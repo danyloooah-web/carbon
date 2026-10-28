@@ -1,0 +1,39 @@
+# dspd-w22: DeepSeek-V4.1-Flash PD arena (dsv41pd-b300-node-v1). Three bound slots; the decode levers run inside the
+# decode / target-verify CUDA graphs (no per-call host cost at replay), the prefill levers are the host-lean forms:
+#   N1  model.layers.*.mlp    decode / target-verify MegaMoE routing through DeepGEMM's fused bf16 mega gate (picks written
+#                             straight into the MegaMoE buffer; all six kept; tolerance class), stock elsewhere.
+#   N2d model.layers.*.mlp    decode-graph MegaMoE tiles 2,128,32 for buckets of >= 270 rows per rank (bit-equal).
+#   MXT / MXT-D model.layers.*.self_attn  CuTe-DSL MXFP8 projections (wq_b, indexer wq_b): prefill tile ((256,256),(2,1)) from
+#                             1024 rows and per-bucket decode tactics, bit-identical, checked at first use, precompiled.
+#   EGP model.layers.*.engram Engram lookups via the engine's engram_gather_peer kernel over legacy CUDA-IPC mappings of the
+#                             engine's own TP-peer shards; bit-identical, verified + agreed over gloo; N3 fallback; MXT-E.
+#   EKQ v2 model.layers.*.engram eager prefill calls of >= 1024 rows (audit-visible): Engram layer 14 (update ~5 % of the node
+#                             output) runs its whole wkv projection in NVFP4 W4A4 (per-token activation scales), layer 1
+#                             only the key half (value half = the engine's exact MXFP8 linear); compiled kernels called
+#                             directly (no FlashInfer wrapper layers, no sync), every FP4 kernel compiled at warm-up.
+# The ops pin the engine functions they mirror and fall back to stock on a mismatch.
+bundle_id = "dspd-w22"
+abi_version = "cacheon-op-abi-v0"
+
+[competition]
+target = "forward_pass"
+mode = "slot"
+arena = "dsv41pd-b300-node-v1"
+
+[[ops]]
+slot = "model.layers.*.mlp"
+source = "dspd/mlp.py"
+entry = "forward"
+prepare = "prepare"
+
+[[ops]]
+slot = "model.layers.*.engram"
+source = "dspd/engram.py"
+entry = "forward"
+prepare = "prepare"
+
+[[ops]]
+slot = "model.layers.*.self_attn"
+source = "dspd/attn.py"
+entry = "forward"
+prepare = "prepare"
