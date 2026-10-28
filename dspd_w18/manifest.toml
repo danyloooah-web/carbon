@@ -1,0 +1,54 @@
+# dspd-w18 (= w16 + EKQ-L: Engram layer 14's whole projection in NVFP4, layer 1 key half only; EKQ from 1024 rows, N2t off, MXT/EKQ kernels precompiled before scored windows): DeepSeek-V4.1-Flash PD arena (dsv41pd-b300-node-v1), wave 1 (engine-backed levers, no CUDA units).
+#   N1 model.layers.*.mlp    decode / target-verify MegaMoE routing through DeepGEMM's fused bf16 mega gate (picks written
+#                            straight into the MegaMoE buffer; all six kept; tolerance class), stock elsewhere.
+#   EGP model.layers.*.engram every Engram lookup (decode graphs and eager prefill) reads each id from the TP rank whose shard
+#                            owns it, in place over NVLink (engine kernel engram_gather_peer on CUDA-IPC mappings of the
+#                            engine's own shards): no id all-gather, no row reduce-scatter; bit-identical, verified on a
+#                            synthetic lookup over every shard and agreed over the TP group before use.
+#                            Mapping = legacy CUDA IPC (cudaIpcGetMemHandle / OpenMemHandle via torch storage sharing) of the
+#                            caching-allocator segments holding the engine's own Engram shards, TP peers only: the handle
+#                            class the arena's Mooncake NVLink transport and custom all-reduce use, not VMM / fabric handles.
+#   N3 (fallback when EGP is refused) model.layers.*.engram eager prefill (SUM_LEN) Engram lookup: ids by all_gatherv, rows by reduce_scatterv instead of
+#                            two whole-buffer all-reduces (bit-identical; first eligible call checked against the engine's
+#                            lookup and agreed over the TP group), stock elsewhere.
+#   N2d model.layers.*.mlp   decode-graph MegaMoE tiles 2,128,32 for buckets of >= 270 rows per rank (bit-equal,
+#                            measured 11 % faster than the engine's 2,64,16 there).
+#   MXT model.layers.*.self_attn eager prefill CuTe-DSL MXFP8 projections (wq_b, indexer wq_b; >= 1024 rows) on the tile
+#                            ((256,256), cluster (2,1)) instead of the pinned default: bit-identical, checked at first use.
+#   MXT-E model.layers.*.engram the Engram wkv projection (25600 x 6144) under MXT / MXT-D (same checks; prefill tile
+#                            -15..-25 %, decode bucket tactics -8..-13 %, all bit-identical on the rig).
+#   MXT-D same entry, decode / target-verify graph buckets: per-row-count tactics proven bit-identical on the rig
+#                            (precompiled at prepare outside any capture; eager calls checked at first use).
+#   N2t model.layers.*.mlp   prefill-role decoder-tail row-bucket graphs (layers 20-39, EXTEND, <= 2048 rows per rank):
+#                            the engine's decode-graph MegaMoE BLOCK_M raise (raw 16 / 32 -> tiles 2,64,16) while our node
+#                            warms up / captures a tail graph (#46593 covers decode / verify only); bit-identical.
+#   EKQ model.layers.*.engram eager prefill calls of >= 1024 rows (audit-visible): the wkv projection's key half (4 x 5120 of 25600
+#                            columns) in NVFP4 W4A4 (FlashInfer cute-dsl mm_fp4, per-token activation scales, private
+#                            NVFP4 copy of the engine's key rows); the value half is the engine's MXFP8 linear on its own
+#                            rows (bit-identical columns). Tolerance class: the keys only steer engram_gate's sigmoid.
+# The mlp / engram / attn ops pin the source digests of the engine functions they mirror and fall back to stock on a mismatch.
+bundle_id = "dspd-w18"
+abi_version = "cacheon-op-abi-v0"
+
+[competition]
+target = "forward_pass"
+mode = "slot"
+arena = "dsv41pd-b300-node-v1"
+
+[[ops]]
+slot = "model.layers.*.mlp"
+source = "dspd/mlp.py"
+entry = "forward"
+prepare = "prepare"
+
+[[ops]]
+slot = "model.layers.*.engram"
+source = "dspd/engram.py"
+entry = "forward"
+prepare = "prepare"
+
+[[ops]]
+slot = "model.layers.*.self_attn"
+source = "dspd/attn.py"
+entry = "forward"
+prepare = "prepare"
