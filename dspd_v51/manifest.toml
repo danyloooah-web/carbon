@@ -1,0 +1,40 @@
+# dspd-v51 = dsv41pd.v42 (dspd_v50) + EXM ON, forms A and F, stats BURST.
+# NOT RUN ON A GPU: EXM has never executed on one; the gates G-EXM-0..8 are owed, see README.md. CPU and static
+# checks only, no measured gain. Every served boundary is checked bitwise against stock's on first use.
+# dsv41pd.v42 = dsv41-pd070bf + IDXSTREAM + EDEC48 (each measured alone on
+# pd070bf, box 204.12.180.132, 10-31; every lever writes stock's bytes):
+#   IDXSTREAM (v41b): index-source layers' indexer projections on their own stream in decode / verify
+#   EDEC48 (v41f): pd071's collective-free Engram decode lookup up to 48 requests a rank, not 24
+# dsv41-pd070bf = dsv41-pd065 + LFIX + EPEER + EDEC (pd070 composition, every lever bitwise).
+# dsv41-pd065 = dsv41-pd062 + M462 DeepGEMM #462 FP8xFP4 prefill pipeline items on the image MegaMoE kernel, bitwise (pd060).
+# dsv41-pd062 = dsv41-pd055 + CUBLT cuBLASLt MXFP8 routes for Engram wkv / indexer wq_b / wqkv_a, bitwise (pd062).
+# dsv41-pd055 = dsv41-pd054 + FMLAP prefill attention core on pd007's bitwise FlashMLA grp kernel (pd055).
+# dsv41-pd054 = dsv41-pd052 + SKFUSE2 Engram exchange levers IDGATHER + EQ8 / EQ8G (pd054).
+# dsv41-pd052 = dsv41-pd034 + LEAN v2 (pd032) + exact top-k A2 (pd033) + MEGA_FRONT v2 (pd036) + PGEMM v3 prefill GEMM routes for wq_b / wo_b / wqkv_a / indexer wq_b / Engram wkv (g8c sweep) + MoE tile band (pd046) + TILES + FRONT_PDL decode levers (pd040) + DPCNT replay-tail DP counts from the batch's exchanged counts (pd048) + SKFUSE bitwise small-kernel replacements in the cold prefill forward (pd052).
+# dsv41-pd034 = dsv41-pd027 with ENGRAM_COLS (Engram DP lookup exchanges each shard's own hash columns; bitwise; supersedes ENGRAM_A2A).
+# dsv41-pd027 = dsv41-pd022 without INDEX_REUSE (stock attention module).
+# dsv41-pd022 = dsv41-pd021 + dsv41pd.v16's mega mHC boundary (FlashInfer, stock's bytes) and pinned wq_b CuTe-DSL tactics in decode.
+# dsv41-pd021 = dsv41-pd013 without W4 (its tvm_ffi.load_module fails the intake's dynamic-import check): dsv41-pd010 with the MHC floor at <= 216 decode rows a rank.
+# dsv41-pd010 = dsv41-pd006 with the MHC floor at <= 80 decode rows a rank + ENGRAM_A2A (Engram DP lookup combined by all-to-all, bitwise).
+# dsv41-pd006 = dsv41-pd004 + SK (bit-identical mHC stats reduce, load_jit).
+# dsv41-pd004 = dsv41-pd003 + MHC (decode-sized mHC boundaries skip Mega-mHC).
+# dsv41-pd003 = dsv41-pd002 + dsv41pd-c02 INDEX_REUSE (per-forward packed index-K reuse).
+# dsv41-pd002: DeepSeek-V4.1-Flash-1017 PD arena (sealed dsv41pd config: MegaMoE). MEGA_FRONT = one launch for
+# each MoE layer's routing, routed scale and MegaMoE pre-dispatch, bit for bit stock's buffer; PLACEMENT = layers
+# 0-19's experts and router rows relabeled across the four EP ranks so prefill MegaMoE balances (bitwise stock). The arena string
+# below is the sealed dsv41pd arena id (cacheon ee723475 examples/arena_inputs/dsv41pd/operator.json).
+bundle_id = "dspd-v51"
+abi_version = "cacheon-op-abi-v0"
+
+[competition]
+target = "forward_pass"
+mode = "slot"
+arena = "dsv41pd-b300-node-v1"
+
+[[ops]]
+slot = "model"
+source = "dsv41_pd001/slots.py"
+entry = "forward_model"
+prepare = "prepare_model"
+architectures = ["sm103"]
+cuda_sources = ["dsv41_pd001/exm_common.cuh", "dsv41_pd001/exm_crit.cuh", "dsv41_pd001/exm_stats.cuh"]
